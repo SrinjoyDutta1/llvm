@@ -342,15 +342,71 @@ AST_EMIT(ASTBinaryCmpOp)
 	Value* retVal = nullptr;
 	
 	// PA3: Implement
-	
-	return retVal;
+    llvm::Value* lhsVal = mLHS->emitIR(ctx);
+    llvm::Value* rhsVal = mRHS->emitIR(ctx);
+    IRBuilder<> builder(ctx.mBlock);
+    llvm::Value* cmpResult = nullptr;
+
+    switch (mOp)
+    {
+        case scan::Token::EqualTo:
+            cmpResult = builder.CreateICmpEQ(lhsVal, rhsVal, "cmp_eq");
+            break;
+        case scan::Token::NotEqual:
+            cmpResult = builder.CreateICmpNE(lhsVal, rhsVal, "cmp_ne");
+            break;
+        case scan::Token::LessThan:
+            cmpResult = builder.CreateICmpSLT(lhsVal, rhsVal, "cmp_slt");
+            break;
+        case scan::Token::GreaterThan:
+            cmpResult = builder.CreateICmpSGT(lhsVal, rhsVal, "cmp_sgt");
+            break;
+        default:
+            cmpResult = nullptr; 
+            break;
+    }
+
+    if (cmpResult != nullptr)
+    {
+        retVal = builder.CreateZExt(cmpResult, llvm::Type::getInt32Ty(ctx.mGlobal), "zext");
+    }
+
+    return retVal;
 }
+
+
 
 AST_EMIT(ASTBinaryMathOp)
 {
 	Value* retVal = nullptr;
 	
 	// PA3: Implement
+	llvm::Value* lhsVal = mLHS->emitIR(ctx);
+	llvm::Value* rhsVal = mRHS->emitIR(ctx);
+	IRBuilder<> builder(ctx.mBlock);
+	switch(mOp) {
+		case scan::Token::Plus:
+			retVal = builder.CreateAdd(lhsVal, rhsVal, "add");
+			break;
+		case scan::Token::Minus:
+			retVal = builder.CreateSub(lhsVal, rhsVal, "sub");
+			break;
+		case scan::Token::Mult:
+			retVal = builder.CreateMul(lhsVal, rhsVal, "mul");
+			break;
+		case scan::Token::Div:
+			retVal = builder.CreateSDiv(lhsVal, rhsVal, "sdiv");
+			break;
+		case scan::Token::Mod:
+			retVal = builder.CreateSRem(lhsVal, rhsVal, "srem");
+			break;
+		default:
+			retVal = nullptr;
+			break;
+
+		
+
+	}
 	
 	return retVal;
 }
@@ -371,7 +427,13 @@ AST_EMIT(ASTConstantExpr)
 	Value* retVal = nullptr;
 	
 	// PA3: Implement
-	
+	if (mType == Type::Int) {
+		retVal = llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.mGlobal), mValue);
+	} else if (mType == Type::Char) {
+		retVal = llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx.mGlobal), mValue);
+	}
+
+
 	return retVal;
 }
 
@@ -525,7 +587,12 @@ AST_EMIT(ASTDecl)
 AST_EMIT(ASTCompoundStmt)
 {
 	// PA3: Implement
-	
+	for (auto& decl : mDecls) {
+		decl->emitIR(ctx);
+	}
+	for (auto& stmt : mStmts) {
+		stmt->emitIR(ctx);
+	}
 	return nullptr;
 }
 
@@ -572,7 +639,14 @@ AST_EMIT(ASTWhileStmt)
 AST_EMIT(ASTReturnStmt)
 {
 	// PA3: Implement
-	
+	IRBuilder<> builder(ctx.mBlock);
+	if (mExpr == nullptr) {
+		builder.CreateRetVoid();
+	} else {
+		llvm::Value* returnValue = mExpr->emitIR(ctx);
+		builder.CreateRet(returnValue);
+	}
+
 	return nullptr;
 }
 
@@ -580,6 +654,9 @@ AST_EMIT(ASTExprStmt)
 {
 	// PA3: Implement
 	// Just emit the expression, don't care about the value
+	if (mExpr) {
+		mExpr->emitIR(ctx);
+	}
 	return nullptr;
 }
 
