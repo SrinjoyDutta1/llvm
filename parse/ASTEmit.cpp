@@ -401,10 +401,7 @@ AST_EMIT(ASTBinaryMathOp)
 			retVal = builder.CreateSRem(lhsVal, rhsVal, "srem");
 			break;
 		default:
-			retVal = nullptr;
 			break;
-
-		
 
 	}
 	
@@ -417,6 +414,10 @@ AST_EMIT(ASTNotExpr)
 	Value* retVal = nullptr;
 	
 	// PA3: Implement
+	llvm::Value* subExprVal = mExpr->emitIR(ctx);
+	llvm::IRBuilder<> builder(ctx.mBlock);
+	llvm::Value* cmpResult = builder.CreateICmpEQ(subExprVal, llvm::ConstantInt::get(subExprVal->getType(), 0), "cmp_zero");
+    retVal = builder.CreateZExt(cmpResult, llvm::Type::getInt32Ty(ctx.mGlobal), "zext");
 	
 	return retVal;
 }
@@ -513,10 +514,16 @@ AST_EMIT(ASTFuncExpr)
 AST_EMIT(ASTIncExpr)
 {
 	Value* retVal = nullptr;
-	
 	// PA3: Implement
-	
-	return retVal;
+	llvm::Value* currentValue = mIdent.readFrom(ctx);    
+    llvm::IRBuilder<> builder(ctx.mBlock);
+	if (currentValue->getType() == llvm::Type::getInt32Ty(ctx.mGlobal)) {
+		retVal = builder.CreateAdd(currentValue, llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.mGlobal), 1), "inc");
+	} else {
+		retVal = builder.CreateAdd(currentValue, llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx.mGlobal), 1), "inc");
+	}
+    mIdent.writeTo(ctx, retVal);    
+    return retVal;
 }
 
 AST_EMIT(ASTDecExpr)
@@ -524,8 +531,16 @@ AST_EMIT(ASTDecExpr)
 	Value* retVal = nullptr;
 	
 	// PA3: Implement
-	
-	return retVal;
+    llvm::Value* currentValue = mIdent.readFrom(ctx);    
+    llvm::IRBuilder<> builder(ctx.mBlock);
+	if (currentValue->getType() == llvm::Type::getInt32Ty(ctx.mGlobal)) {
+    	retVal = builder.CreateSub(currentValue, llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx.mGlobal), 1), "dec");
+	} else {
+		retVal = builder.CreateSub(currentValue, llvm::ConstantInt::get(llvm::Type::getInt8Ty(ctx.mGlobal), 1), "dec");
+
+	}
+    mIdent.writeTo(ctx, retVal);
+    return retVal;
 }
 
 AST_EMIT(ASTAddrOfArray)
@@ -602,7 +617,8 @@ AST_EMIT(ASTAssignStmt)
 	// assignments to happen later for full arrays
 	
 	// PA3: Implement
-	
+	Value*exprVal = mExpr->emitIR(ctx);
+	mIdent.writeTo(ctx, exprVal);
 	return nullptr;
 }
 
@@ -626,14 +642,114 @@ AST_EMIT(ASTIfStmt)
 {
 	// PA3: Implement
 	
+	BasicBlock* ifThen = BasicBlock::Create(ctx.mGlobal, "if.then", ctx.mFunc);
+	ctx.mSSA.addBlock(ifThen);
+
+	BasicBlock* ifElse = nullptr;
+	if (mElseStmt) {
+		ifElse = BasicBlock::Create(ctx.mGlobal, "if.else", ctx.mFunc);
+		ctx.mSSA.addBlock(ifElse);
+	}
+
+	BasicBlock* ifEnd = BasicBlock::Create(ctx.mGlobal, "if.end", ctx.mFunc);
+	ctx.mSSA.addBlock(ifEnd);
+
+	{
+		IRBuilder<> builder(ctx.mBlock);
+		Value* condValue = mExpr->emitIR(ctx); 
+		builder.SetInsertPoint(ctx.mBlock);
+		condValue = builder.CreateTrunc(condValue, llvm::Type::getInt1Ty(ctx.mGlobal)); 
+
+		if (mElseStmt) {
+			builder.CreateCondBr(condValue, ifThen, ifElse);
+					ctx.mSSA.sealBlock(ifElse);
+
+			ctx.mSSA.sealBlock(ifThen);
+		} else {
+			builder.CreateCondBr(condValue, ifThen, ifEnd); 
+			ctx.mSSA.sealBlock(ifThen);
+		}
+	}
+
+
+
+	
+
+	if (mElseStmt) {
+		ctx.mBlock = ifElse;
+		IRBuilder<> builder(ctx.mBlock);
+		mElseStmt->emitIR(ctx); 
+		builder.SetInsertPoint(ctx.mBlock);
+		builder.CreateBr(ifEnd);  
+	}
+
+
+
+
+	{
+		ctx.mBlock = ifThen;
+		IRBuilder<> builder(ctx.mBlock);
+		mThenStmt->emitIR(ctx);  
+		builder.SetInsertPoint(ctx.mBlock);
+		builder.CreateBr(ifEnd);  
+	}
+
+
+	{
+		ctx.mBlock = ifEnd;
+		ctx.mSSA.sealBlock(ctx.mBlock);
+	}
+
 	return nullptr;
 }
+
+
+
+
+
+
+
+
+
+
+
 
 AST_EMIT(ASTWhileStmt)
 {
 	// PA3: Implement
+
+    llvm::BasicBlock* whileCond = llvm::BasicBlock::Create(ctx.mGlobal, "while.cond", ctx.mFunc);
+    ctx.mSSA.addBlock(whileCond);
+    
+    llvm::BasicBlock* whileBody = llvm::BasicBlock::Create(ctx.mGlobal, "while.body", ctx.mFunc);
+    ctx.mSSA.addBlock(whileBody);
+    
+    llvm::BasicBlock* whileEnd = llvm::BasicBlock::Create(ctx.mGlobal, "while.end", ctx.mFunc);
+    ctx.mSSA.addBlock(whileEnd);
+    
+	llvm::IRBuilder<> builder(ctx.mBlock); 
+    builder.CreateBr(whileCond);   
 	
-	return nullptr;
+	ctx.mBlock = whileCond;
+	llvm::Value* condVal = mExpr->emitIR(ctx); 
+              
+
+    {
+        llvm::IRBuilder<> builder(ctx.mBlock);
+		condVal = builder.CreateICmpNE(condVal, ctx.mZero);
+        builder.CreateCondBr(condVal, whileBody, whileEnd); 
+    }
+	ctx.mBlock = whileBody;               
+	mLoopStmt->emitIR(ctx); 
+    {              
+        
+        llvm::IRBuilder<> builder(ctx.mBlock);
+        builder.CreateBr(whileCond);         
+    }
+
+    ctx.mBlock = whileEnd;
+
+    return nullptr;
 }
 
 AST_EMIT(ASTReturnStmt)
